@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
 import * as Icons from 'lucide-react';
-import { ODOO_COLORS } from '../constants';
 
 interface LoginScreenProps {
   onLogin: (user: string, pass: string) => Promise<void>;
@@ -18,70 +17,36 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, isLoading, error }) 
       alert("Por favor, ingrese su correo corporativo completo.");
       return;
     }
-    // Enviamos un string vacío como contraseña ya que ahora el sistema usa la API Key maestra
     onLogin(username, "");
   };
 
-  const renderError = () => {
-    if (!error) return null;
-
-    let title = "Acceso Denegado";
-    let message = error;
-
-    if (error.includes("Correo no encontrado")) {
-      title = "Usuario No Registrado";
-      message = "El correo ingresado no existe en nuestra base de datos de Odoo. Contacte con Almacén Central.";
-    }
-
-    return (
-      <div className="bg-red-50 border border-red-200 p-5 rounded-2xl animate-shake">
-        <div className="flex items-start gap-4">
-          <div className="p-2 bg-red-100 text-red-600 rounded-lg">
-            <Icons.AlertTriangle size={20} />
-          </div>
-          <div className="flex-1">
-            <p className="text-sm font-black text-red-900">{title}</p>
-            <p className="text-xs text-red-700 mt-1 leading-relaxed">{message}</p>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   return (
-    <div className="min-h-screen bg-[#fcfcfc] flex flex-col items-center justify-center p-6 relative overflow-hidden">
-      {/* Background Decor */}
-      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-purple-100/30 rounded-full -mr-64 -mt-64 blur-3xl" />
-      <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-teal-100/20 rounded-full -ml-64 -mb-64 blur-3xl" />
+    <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-6 relative">
+      {/* Mesh Background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] rounded-full bg-indigo-500/5 blur-[120px]" />
+        <div className="absolute top-[20%] -right-[5%] w-[30%] h-[30%] rounded-full bg-blue-500/5 blur-[100px]" />
+      </div>
 
-      <div className="w-full max-w-md relative z-10">
-        {/* Brand */}
-        <div className="flex flex-col items-center mb-10 animate-fade-in">
-          <div 
-            className="w-24 h-24 rounded-[2.5rem] flex items-center justify-center text-white font-black italic text-4xl shadow-[0_20px_50px_rgba(113,75,103,0.3)] mb-8"
-            style={{ background: `linear-gradient(135deg, ${ODOO_COLORS.purple} 0%, #4a3144 100%)` }}
-          >
-            SJS
+      <div className="w-full max-w-md z-10">
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 text-white shadow-xl shadow-indigo-200 mb-6">
+            <Icons.Command size={32} />
           </div>
-          <h1 className="text-2xl font-black text-gray-900 tracking-tight text-center">Portal de Abastecimiento</h1>
-          <p className="text-gray-500 mt-2 font-bold uppercase tracking-widest text-[10px] text-center px-4">CADENA DE BOTICAS SAN JOSE S.A.C.</p>
+          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">SJS Portal</h1>
+          <p className="text-slate-500 mt-2 font-medium">Abastecimiento • Boticas San José</p>
         </div>
 
-        {/* Login Card */}
-        <div className="bg-white rounded-[3rem] shadow-[0_30px_100px_rgba(0,0,0,0.08)] border border-gray-100 p-12 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-purple-500 via-teal-500 to-indigo-600" />
-          
-          <h2 className="text-lg font-black text-gray-900 mb-8 text-center uppercase tracking-tighter">Ingrese su Correo para comenzar</h2>
-          
-          <form onSubmit={handleSubmit} className="space-y-8">
+        <div className="bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 border border-slate-100 p-10">
+          <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3 ml-1">Correo Corporativo Odoo</label>
-              <div className="relative group">
-                <Icons.User className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-purple-500 transition-colors" size={20} />
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Correo Corporativo</label>
+              <div className="relative">
+                <Icons.Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                 <input 
                   type="email"
-                  className="w-full pl-14 pr-6 py-5 bg-gray-50 border-2 border-transparent focus:border-purple-500 focus:bg-white rounded-[1.5rem] outline-none transition-all font-bold text-gray-800 text-lg"
-                  placeholder="nombre@sanjose.pe"
+                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/5 rounded-2xl outline-none transition-all font-semibold text-slate-700"
+                  placeholder="usuario@sanjose.pe"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   disabled={isLoading}
@@ -90,33 +55,36 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, isLoading, error }) 
               </div>
             </div>
 
-            {renderError()}
+            {error && (
+              <div className="flex gap-3 p-4 bg-red-50 border border-red-100 rounded-2xl animate-shake">
+                <Icons.AlertCircle className="text-red-500 shrink-0" size={18} />
+                <p className="text-xs font-semibold text-red-700">{error}</p>
+              </div>
+            )}
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-[#017e84] text-white py-6 rounded-[1.5rem] font-black text-lg hover:bg-[#016a6f] hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl disabled:opacity-50 flex items-center justify-center gap-4"
+              className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-sm hover:bg-slate-800 transition-all shadow-lg active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3"
             >
               {isLoading ? (
                 <>
-                  <Icons.Loader2 className="animate-spin" size={24} strokeWidth={3} />
-                  Buscando en Odoo...
+                  <Icons.Loader2 className="animate-spin" size={18} />
+                  <span>Autenticando...</span>
                 </>
               ) : (
                 <>
-                  <span>INGRESAR A MIS PEDIDOS</span>
-                  <Icons.ArrowRight size={20} strokeWidth={3} />
+                  <span>Entrar al Portal</span>
+                  <Icons.ArrowRight size={18} />
                 </>
               )}
             </button>
           </form>
         </div>
 
-        {/* Info */}
-        <div className="mt-10 flex items-center justify-center gap-2 text-gray-400 animate-pulse">
-          <Icons.ShieldCheck size={16} />
-          <p className="text-[10px] font-black uppercase tracking-[0.2em]">Acceso Seguro por ID de Empleado</p>
-        </div>
+        <p className="mt-8 text-center text-slate-400 text-xs font-medium flex items-center justify-center gap-2">
+          <Icons.ShieldCheck size={14} /> Acceso seguro con credenciales Odoo
+        </p>
       </div>
     </div>
   );

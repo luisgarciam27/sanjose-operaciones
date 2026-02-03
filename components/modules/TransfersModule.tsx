@@ -31,7 +31,7 @@ const TransfersModule: React.FC<TransfersModuleProps> = ({ session, odooClient }
   const [search, setSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Patrones actualizados incluyendo PRINCIPAL1
+  // Mantenemos la lógica de filtros intacta
   const allowedPatterns = ['B1', 'B2', 'B3', 'B4', 'B5', 'PRINCIPAL1', 'PRINCIPAL', 'PR/'];
 
   useEffect(() => {
@@ -54,27 +54,16 @@ const TransfersModule: React.FC<TransfersModuleProps> = ({ session, odooClient }
         ['picking_type_id.name', 'ilike', 'Transferencias internas'],
         ['origin', 'ilike', 'Solicitud App:']
       ];
-      
       if (session.role === 'employee') {
         domain.push('|', ['partner_id', '=', session.partner_id], ['create_uid', '=', session.odoo_user_id]);
       }
-
       const [transfersData, locationsData, posData] = await Promise.all([
-        odooClient.searchRead('stock.picking', 
-          domain, 
-          ['name', 'origin', 'state', 'scheduled_date', 'location_id', 'location_dest_id', 'company_id', 'partner_id'], 
-          { limit: 80, order: 'id desc' }
-        ),
+        odooClient.searchRead('stock.picking', domain, ['name', 'origin', 'state', 'scheduled_date', 'location_id', 'location_dest_id'], { limit: 80, order: 'id desc' }),
         odooClient.searchRead('stock.location', [['usage', '=', 'internal']], ['name', 'complete_name']),
         odooClient.searchRead('pos.config', [], ['name'])
       ]);
-      
       setTransfers(transfersData);
-      
       const rawLocs = locationsData as Location[];
-      const posConfigs = posData as any[];
-
-      // Enriquecer ubicaciones con el mapeo específico proporcionado por el usuario
       const enrichedLocs: LocationWithPos[] = rawLocs
         .filter(loc => {
           const fullName = (loc.complete_name || loc.name || '').toUpperCase();
@@ -82,60 +71,23 @@ const TransfersModule: React.FC<TransfersModuleProps> = ({ session, odooClient }
         })
         .map(loc => {
           const locName = (loc.complete_name || loc.name || '').toUpperCase();
-          
-          // Mapeo manual según la distribución real del cliente
           let matchedPosNames: string[] = [];
-          
-          if (locName.includes('B1')) {
-            matchedPosNames = ['Botica 1 CASA MIRIAM', 'BOTICA 1 - CAJA B'];
-          } else if (locName.includes('B2')) {
-            matchedPosNames = ['Botica 2'];
-          } else if (locName.includes('B3')) {
-            matchedPosNames = ['Botica 3'];
-          } else if (locName.includes('B4')) {
-            matchedPosNames = ['Botica 4'];
-          } else if (locName.includes('B5')) {
-            matchedPosNames = ['Botica 0'];
-          } else if (locName.includes('PRINCIPAL') || locName.includes('PR/')) {
-            matchedPosNames = ['ALMACÉN CENTRAL'];
-          }
-
-          // Si no hubo match manual, intentamos buscar en los configs de Odoo por si acaso
-          if (matchedPosNames.length === 0) {
-            matchedPosNames = posConfigs
-              .filter(pos => {
-                const pn = pos.name.toUpperCase();
-                return pn.includes(locName.split('/').pop() || '!!!');
-              })
-              .map(pos => pos.name);
-          }
-
-          return {
-            ...loc,
-            pos_names: matchedPosNames
-          };
+          if (locName.includes('B1')) matchedPosNames = ['Botica 1 CASA MIRIAM', 'BOTICA 1 - CAJA B'];
+          else if (locName.includes('B2')) matchedPosNames = ['Botica 2'];
+          else if (locName.includes('B3')) matchedPosNames = ['Botica 3'];
+          else if (locName.includes('B4')) matchedPosNames = ['Botica 4'];
+          else if (locName.includes('B5')) matchedPosNames = ['Botica 0'];
+          else if (locName.includes('PRINCIPAL') || locName.includes('PR/')) matchedPosNames = ['ALMACÉN CENTRAL'];
+          return { ...loc, pos_names: matchedPosNames };
         });
-
       setLocations(enrichedLocs);
-
-      // Lógica de selección por defecto corregida
       if (enrichedLocs.length > 0) {
-        // Buscar PRINCIPAL1 o similar para el ORIGEN
-        const mainWarehouse = enrichedLocs.find(l => {
-          const n = (l.complete_name || l.name || '').toUpperCase();
-          return n.includes('PRINCIPAL1') || n.includes('PRINCIPAL') || n.includes('PR/');
-        });
+        const mainWarehouse = enrichedLocs.find(l => (l.complete_name || l.name || '').toUpperCase().includes('PRINCIPAL1'));
         setSourceLoc(mainWarehouse ? mainWarehouse.id : enrichedLocs[0].id);
-        
-        // Destino por defecto para el empleado
         const b1 = enrichedLocs.find(l => (l.complete_name || l.name || '').includes('B1'));
         setDestLoc(b1 ? b1.id : enrichedLocs[0].id);
       }
-    } catch (err) {
-      console.error("Error cargando datos:", err);
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (err) { console.error(err); } finally { setIsLoading(false); }
   };
 
   const fetchProductsWithStock = async () => {
@@ -144,150 +96,106 @@ const TransfersModule: React.FC<TransfersModuleProps> = ({ session, odooClient }
     try {
       const data = await odooClient.getProductsWithStock(sourceLoc, search);
       setProducts(data as any[]);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const formatOdooDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffTime = now.getTime() - date.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays > 0) {
-      return <span className="text-[#e63946] font-bold">hace {diffDays} d</span>;
-    }
-    return <span className="text-gray-500 font-medium">{date.toLocaleDateString('es-PE')}</span>;
-  };
-
-  const addToCart = (product: Product) => {
-    setCart(prev => {
-      const existing = prev.find(item => item.product_id === product.id);
-      if (existing) {
-        return prev.map(item => item.product_id === product.id ? {...item, qty: item.qty + 1} : item);
-      }
-      return [...prev, { 
-        product_id: product.id, 
-        product_name: product.name, 
-        qty: 1,
-        available_at_source: product.qty_available,
-        uom_id: product.uom_id ? product.uom_id[0] : 1
-      }];
-    });
+    } finally { setIsSearching(false); }
   };
 
   const getLocationDisplayName = (locId: number) => {
     const loc = locations.find(l => l.id === locId);
     if (!loc) return '---';
     const cleanName = loc.name.split('/').pop() || loc.name;
-    const posStr = loc.pos_names.length > 0 ? ` (${loc.pos_names[0]})` : '';
-    return cleanName + posStr;
+    return cleanName + (loc.pos_names.length > 0 ? ` (${loc.pos_names[0]})` : '');
+  };
+
+  const addToCart = (product: Product) => {
+    setCart(prev => {
+      const existing = prev.find(item => item.product_id === product.id);
+      if (existing) return prev.map(item => item.product_id === product.id ? {...item, qty: item.qty + 1} : item);
+      return [...prev, { product_id: product.id, product_name: product.name, qty: 1, available_at_source: product.qty_available, uom_id: product.uom_id ? product.uom_id[0] : 1 }];
+    });
   };
 
   const handleSubmit = async () => {
     if (cart.length === 0) return;
-    if (sourceLoc === destLoc) {
-      alert("Error: El origen y destino no pueden ser el mismo.");
-      return;
-    }
+    if (sourceLoc === destLoc) { alert("Error: Origen y Destino idénticos"); return; }
     setIsSubmitting(true);
     try {
-      const pickingTypes = await odooClient.searchRead('stock.picking.type', 
-        [['name', 'ilike', 'Transferencias internas']], 
-        ['id']
-      );
-      
+      const pickingTypes = await odooClient.searchRead('stock.picking.type', [['name', 'ilike', 'Transferencias internas']], ['id']);
       const pickingTypeId = pickingTypes.length > 0 ? pickingTypes[0].id : 5;
-
       await odooClient.create('stock.picking', {
-        picking_type_id: pickingTypeId,
-        location_id: sourceLoc,
-        location_dest_id: destLoc,
-        partner_id: session.partner_id,
-        origin: `Solicitud App: ${session.name}`,
-        company_id: session.company_id,
-        state: 'draft',
-        move_lines: cart.map(item => [0, 0, {
-          product_id: item.product_id,
-          name: item.product_name,
-          product_uom_qty: item.qty,
-          product_uom: item.uom_id,
-          location_id: sourceLoc,
-          location_dest_id: destLoc,
-          company_id: session.company_id,
-        }])
+        picking_type_id: pickingTypeId, location_id: sourceLoc, location_dest_id: destLoc, partner_id: session.partner_id,
+        origin: `Solicitud App: ${session.name}`, company_id: session.company_id, state: 'draft',
+        move_lines: cart.map(item => [0, 0, { product_id: item.product_id, name: item.product_name, product_uom_qty: item.qty, product_uom: item.uom_id, location_id: sourceLoc, location_dest_id: destLoc, company_id: session.company_id }])
       });
-
-      alert(`✅ Pedido enviado a Odoo.`);
-      setShowModal(false);
-      setCart([]);
-      fetchInitialData();
-    } catch (err: any) {
-      alert('Error en Odoo: ' + err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
+      alert(`✅ Orden generada con éxito.`); setShowModal(false); setCart([]); fetchInitialData();
+    } catch (err: any) { alert('Odoo: ' + err.message); } finally { setIsSubmitting(false); }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+    <div className="space-y-8 animate-fade-in">
+      {/* SaaS Header Section */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h1 className="text-[22px] font-black text-[#2c2e3e] uppercase tracking-tight">
-            Gestión de Abastecimiento
-          </h1>
-          <p className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mt-1">
-            Red de Boticas San José - Almacén Central {locations.find(l => (l.complete_name||'').includes('PRINCIPAL1')) ? 'Detectado' : ''}
-          </p>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Abastecimiento Interno</h1>
+          <p className="text-slate-500 font-semibold text-sm mt-1">Gestión de stock entre almacenes y boticas.</p>
         </div>
         <button 
           onClick={() => setShowModal(true)}
-          className="bg-[#017e84] text-white px-6 py-2.5 rounded-lg flex items-center gap-2 hover:bg-[#016a6f] transition font-black text-xs uppercase shadow-lg active:scale-95"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-2xl flex items-center gap-3 transition-all font-bold text-sm shadow-xl shadow-indigo-100 active:scale-95"
         >
-          <Icons.PlusCircle size={18} strokeWidth={3} />
-          CREAR NUEVO PEDIDO
+          <Icons.Plus size={18} strokeWidth={3} />
+          Nueva Solicitud
         </button>
       </div>
 
-      <div className="bg-white border border-gray-100 shadow-sm rounded-lg overflow-hidden">
+      {/* Main Table SaaS Style */}
+      <div className="bg-white border border-slate-200 shadow-sm rounded-3xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
-            <thead className="bg-[#f8f9fa] border-b border-gray-100 text-[11px] font-black text-gray-400 uppercase tracking-widest">
-              <tr>
-                <th className="px-6 py-4">Referencia</th>
-                <th className="px-6 py-4">Desde</th>
-                <th className="px-6 py-4">Hacia</th>
-                <th className="px-6 py-4">Fecha</th>
-                <th className="px-6 py-4">Usuario</th>
-                <th className="px-6 py-4 text-right">Estado</th>
+            <thead>
+              <tr className="bg-slate-50/50 border-b border-slate-100">
+                <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em]">Documento</th>
+                <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em]">Ruta</th>
+                <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em]">Programado</th>
+                <th className="px-8 py-5 text-right text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em]">Estatus</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-slate-50">
               {isLoading ? (
-                <tr><td colSpan={6} className="p-20 text-center"><Icons.Loader2 className="animate-spin mx-auto text-teal-600" /></td></tr>
+                <tr><td colSpan={4} className="p-20 text-center"><Icons.Loader2 className="animate-spin mx-auto text-indigo-500" size={32} /></td></tr>
               ) : transfers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-24 text-center">
-                    <Icons.PackageOpen size={48} className="text-gray-100 mx-auto mb-4" />
-                    <p className="text-gray-300 font-bold uppercase text-[10px] tracking-widest italic">Sin pedidos registrados hoy.</p>
+                  <td colSpan={4} className="p-32 text-center">
+                    <div className="flex flex-col items-center gap-4 text-slate-300">
+                      <Icons.FileSearch size={64} strokeWidth={1} />
+                      <p className="font-bold text-sm uppercase tracking-widest">No hay registros hoy</p>
+                    </div>
                   </td>
                 </tr>
               ) : transfers.map(t => (
-                <tr key={t.id} className="hover:bg-gray-50/50 transition-colors text-[13px] group">
-                  <td className="px-6 py-4 font-bold text-[#017e84]">{t.name}</td>
-                  <td className="px-6 py-4 text-gray-600 font-medium">{getLocationDisplayName(t.location_id[0])}</td>
-                  <td className="px-6 py-4 text-gray-600 font-medium">{getLocationDisplayName(t.location_dest_id[0])}</td>
-                  <td className="px-6 py-4 font-bold">{formatOdooDate(t.scheduled_date)}</td>
-                  <td className="px-6 py-4 text-gray-400 font-medium truncate max-w-[150px]">{t.origin}</td>
-                  <td className="px-6 py-4 text-right">
-                    <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter ${
-                      t.state === 'done' ? 'bg-[#dcfce7] text-[#15803d]' : 
-                      t.state === 'draft' ? 'bg-blue-100 text-blue-800' :
-                      'bg-orange-100 text-orange-700'
+                <tr key={t.id} className="hover:bg-slate-50/30 transition-colors group">
+                  <td className="px-8 py-6">
+                    <span className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{t.name}</span>
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">{t.origin}</p>
+                  </td>
+                  <td className="px-8 py-6">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-slate-600">{getLocationDisplayName(t.location_id[0])}</span>
+                      <Icons.ArrowRight size={14} className="text-slate-300" />
+                      <span className="text-xs font-bold text-slate-900">{getLocationDisplayName(t.location_dest_id[0])}</span>
+                    </div>
+                  </td>
+                  <td className="px-8 py-6">
+                    <span className="text-xs font-bold text-slate-500">
+                      {new Date(t.scheduled_date).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}
+                    </span>
+                  </td>
+                  <td className="px-8 py-6 text-right">
+                    <span className={`inline-flex px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                      t.state === 'done' ? 'bg-emerald-50 text-emerald-600' : 
+                      t.state === 'draft' ? 'bg-indigo-50 text-indigo-600' :
+                      'bg-amber-50 text-amber-600'
                     }`}>
-                      {t.state === 'done' ? 'RECIBIDO' : t.state === 'draft' ? 'BORRADOR' : 'EN CAMINO'}
+                      {t.state === 'done' ? 'Completado' : t.state === 'draft' ? 'Borrador' : 'Pendiente'}
                     </span>
                   </td>
                 </tr>
@@ -297,68 +205,64 @@ const TransfersModule: React.FC<TransfersModuleProps> = ({ session, odooClient }
         </div>
       </div>
 
+      {/* Modern Workspace Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-[#2c2e3e]/90 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#fcfcfc]">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-[#017e84] text-white rounded-2xl flex items-center justify-center shadow-inner">
-                  <Icons.Warehouse size={24} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-black text-[#2c2e3e] uppercase leading-tight">Nueva Orden de Reabastecimiento</h2>
-                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Configura tu transferencia interna</p>
-                </div>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 md:p-12 bg-slate-900/60 backdrop-blur-md animate-fade-in">
+          <div className="bg-white w-full max-w-6xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-full">
+            <div className="px-10 py-8 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">Configurar Solicitud</h2>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Llenado de stock inteligente</p>
               </div>
-              <button onClick={() => setShowModal(false)} className="text-gray-300 hover:text-red-500 transition-colors p-3 hover:bg-red-50 rounded-full">
-                <Icons.X size={28} />
+              <button onClick={() => setShowModal(false)} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all">
+                <Icons.X size={24} />
               </button>
             </div>
 
             <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
-              <div className="flex-1 p-8 overflow-y-auto border-r border-gray-100 custom-scrollbar">
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
-                       <Icons.LogOut size={12} className="rotate-90" /> ALMACÉN DE SALIDA (ORIGEN)
+              {/* Warehouse & Search Selection */}
+              <div className="flex-1 p-10 overflow-y-auto custom-scrollbar space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                       <Icons.LogOut size={12} className="rotate-90 text-indigo-500" /> Almacén Origen
                     </label>
                     <select 
                       value={sourceLoc} 
                       onChange={(e) => setSourceLoc(Number(e.target.value))}
-                      className="w-full p-4 border-2 border-gray-100 rounded-2xl text-[14px] font-black bg-white outline-none focus:border-[#017e84] transition-all cursor-pointer shadow-sm text-gray-700"
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 transition-all appearance-none cursor-pointer"
                     >
                       {locations.map(l => (
                         <option key={l.id} value={l.id}>
-                          {l.name.split('/').pop()} {l.pos_names.length > 0 ? `→ [${l.pos_names.join(', ')}]` : ''}
+                          {l.name.split('/').pop()} {l.pos_names.length > 0 ? `[${l.pos_names.join(', ')}]` : ''}
                         </option>
                       ))}
                     </select>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
-                       <Icons.LogIn size={12} className="rotate-90" /> ALMACÉN DE LLEGADA (DESTINO)
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                       <Icons.LogIn size={12} className="rotate-90 text-emerald-500" /> Almacén Destino
                     </label>
                     <select 
                       value={destLoc} 
                       onChange={(e) => setDestLoc(Number(e.target.value))}
-                      className="w-full p-4 border-2 border-gray-100 rounded-2xl text-[14px] font-black bg-white outline-none focus:border-[#017e84] transition-all cursor-pointer shadow-sm text-gray-700"
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 transition-all appearance-none cursor-pointer"
                     >
                       {locations.map(l => (
                         <option key={l.id} value={l.id}>
-                          {l.name.split('/').pop()} {l.pos_names.length > 0 ? `→ [${l.pos_names.join(', ')}]` : ''}
+                          {l.name.split('/').pop()} {l.pos_names.length > 0 ? `[${l.pos_names.join(', ')}]` : ''}
                         </option>
                       ))}
                     </select>
                   </div>
                 </div>
 
-                <div className="relative mb-8">
-                  <Icons.Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+                <div className="relative">
+                  <Icons.Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
                   <input 
                     type="text" 
-                    placeholder="Escriba el nombre del producto o código..." 
-                    className="w-full pl-14 pr-6 py-4 bg-gray-50 border-2 border-transparent rounded-2xl text-sm focus:bg-white transition-all outline-none focus:ring-4 focus:ring-[#017e84]/10 font-bold shadow-inner" 
+                    placeholder="Escriba el nombre o código del producto..." 
+                    className="w-full pl-14 pr-6 py-5 bg-slate-50 border border-slate-200 rounded-3xl text-sm font-bold focus:bg-white outline-none focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 transition-all shadow-inner" 
                     value={search} 
                     onChange={(e) => setSearch(e.target.value)} 
                   />
@@ -366,28 +270,27 @@ const TransfersModule: React.FC<TransfersModuleProps> = ({ session, odooClient }
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {isSearching ? (
-                    <div className="col-span-full py-16 text-center"><Icons.Loader2 className="animate-spin mx-auto text-[#017e84]" size={32} /></div>
+                    <div className="col-span-full py-16 text-center"><Icons.Loader2 className="animate-spin mx-auto text-indigo-500" size={40} /></div>
                   ) : products.length === 0 ? (
-                    <div className="col-span-full py-20 text-center text-gray-300 text-[10px] font-black uppercase tracking-widest italic flex flex-col items-center gap-4">
-                       <Icons.Ghost size={32} />
-                       No hay stock disponible en el origen seleccionado.
+                    <div className="col-span-full py-24 text-center text-slate-300 flex flex-col items-center gap-4">
+                       <Icons.Package size={48} strokeWidth={1} />
+                       <p className="text-xs font-bold uppercase tracking-widest italic">No hay stock disponible en el origen.</p>
                     </div>
                   ) : products.map(p => (
                     <div 
                       key={p.id} 
                       onClick={() => addToCart(p)} 
-                      className="p-5 border-2 border-gray-50 rounded-[1.5rem] flex justify-between items-center cursor-pointer hover:border-[#017e84] hover:bg-teal-50/50 transition-all active:scale-95 bg-white shadow-sm group"
+                      className="p-5 border border-slate-100 rounded-3xl flex justify-between items-center cursor-pointer hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/5 transition-all active:scale-95 bg-white shadow-sm group"
                     >
                       <div className="min-w-0 pr-4">
-                        <p className="text-xs font-black text-gray-800 uppercase truncate leading-tight mb-1">{p.name}</p>
-                        <div className="flex items-center gap-3">
-                           <span className={`text-[10px] px-2 py-0.5 rounded font-black ${p.qty_available > 0 ? 'bg-teal-100 text-teal-700' : 'bg-red-100 text-red-700'}`}>
+                        <p className="text-xs font-black text-slate-900 uppercase truncate leading-tight mb-2">{p.name}</p>
+                        <div className="flex items-center gap-2">
+                           <span className={`text-[10px] px-2 py-0.5 rounded-lg font-black ${p.qty_available > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
                              {p.qty_available} EN STOCK
                            </span>
-                           <span className="text-[9px] text-gray-400 font-bold uppercase">{p.default_code || 'S/C'}</span>
                         </div>
                       </div>
-                      <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-[#017e84] group-hover:bg-[#017e84] group-hover:text-white transition-all shadow-sm">
+                      <div className="w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all">
                         <Icons.Plus size={20} strokeWidth={3} />
                       </div>
                     </div>
@@ -395,32 +298,41 @@ const TransfersModule: React.FC<TransfersModuleProps> = ({ session, odooClient }
                 </div>
               </div>
 
-              <div className="w-full lg:w-80 p-8 bg-[#fcfcfc] flex flex-col border-l border-gray-100 shadow-[-10px_0_30px_rgba(0,0,0,0.02)]">
-                <div className="flex items-center justify-between mb-6">
-                   <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em]">Items Seleccionados</h3>
-                   <span className="bg-[#017e84] text-white px-2.5 py-1 rounded-lg text-[10px] font-black">{cart.length}</span>
+              {/* Shopping Cart Summary SaaS Style */}
+              <div className="w-full lg:w-96 p-10 bg-slate-50/80 border-l border-slate-100 flex flex-col">
+                <div className="flex items-center justify-between mb-8">
+                   <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Cesta de Pedido</h3>
+                   <span className="bg-indigo-600 text-white px-3 py-1 rounded-xl text-[10px] font-black shadow-lg shadow-indigo-100">{cart.length}</span>
                 </div>
 
-                <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto space-y-4 pr-1 custom-scrollbar">
                   {cart.length === 0 ? (
-                    <div className="text-center py-20 text-gray-300 text-[10px] font-black uppercase italic flex flex-col items-center gap-4 border-2 border-dashed border-gray-100 rounded-3xl">
-                       <Icons.ShoppingBasket size={32} />
-                       Cesta Vacía
+                    <div className="text-center py-20 text-slate-300 flex flex-col items-center gap-4 border-2 border-dashed border-slate-200 rounded-[2.5rem]">
+                       <Icons.ShoppingBag size={40} strokeWidth={1.5} />
+                       <span className="text-[10px] font-bold uppercase tracking-widest">Sin productos</span>
                     </div>
                   ) : cart.map(item => (
-                    <div key={item.product_id} className="bg-white p-4 rounded-2xl border-2 border-gray-50 flex justify-between items-center shadow-sm animate-fade-in hover:border-teal-200 transition-colors">
-                      <div className="flex-1 pr-3">
-                        <p className="text-[10px] font-black text-gray-800 truncate uppercase leading-tight">{item.product_name}</p>
-                        <p className="text-[9px] text-teal-600 font-bold mt-1 uppercase">Max: {item.available_at_source}</p>
+                    <div key={item.product_id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm animate-fade-in group hover:border-indigo-200 transition-colors">
+                      <div className="flex-1 mb-3">
+                        <p className="text-[11px] font-black text-slate-900 uppercase truncate leading-tight mb-1">{item.product_name}</p>
+                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Máx: {item.available_at_source}</p>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <input 
-                          type="number" 
-                          value={item.qty} 
-                          onChange={(e) => setCart(prev => prev.map(i => i.product_id === item.product_id ? {...i, qty: Math.max(1, parseInt(e.target.value) || 1)} : i))} 
-                          className="w-12 text-center text-[12px] font-black py-2 border-2 border-gray-100 rounded-xl bg-gray-50 outline-none focus:border-[#017e84] focus:bg-white" 
-                        />
-                        <button onClick={() => setCart(prev => prev.filter(i => i.product_id !== item.product_id))} className="text-gray-300 hover:text-red-500 transition-colors p-1">
+                      <div className="flex items-center justify-between gap-4 pt-3 border-t border-slate-50">
+                        <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl">
+                          <button onClick={() => setCart(prev => prev.map(i => i.product_id === item.product_id ? {...i, qty: Math.max(1, i.qty - 1)} : i))} className="w-8 h-8 rounded-lg hover:bg-white text-slate-500 transition-colors">
+                            <Icons.Minus size={14} />
+                          </button>
+                          <input 
+                            type="number" 
+                            value={item.qty} 
+                            onChange={(e) => setCart(prev => prev.map(i => i.product_id === item.product_id ? {...i, qty: Math.max(1, parseInt(e.target.value) || 1)} : i))} 
+                            className="w-10 text-center text-xs font-black bg-transparent outline-none text-slate-900" 
+                          />
+                          <button onClick={() => setCart(prev => prev.map(i => i.product_id === item.product_id ? {...i, qty: i.qty + 1} : i))} className="w-8 h-8 rounded-lg hover:bg-white text-slate-500 transition-colors">
+                            <Icons.Plus size={14} />
+                          </button>
+                        </div>
+                        <button onClick={() => setCart(prev => prev.filter(i => i.product_id !== item.product_id))} className="text-slate-300 hover:text-red-500 transition-colors p-2">
                           <Icons.Trash2 size={16} />
                         </button>
                       </div>
@@ -428,21 +340,21 @@ const TransfersModule: React.FC<TransfersModuleProps> = ({ session, odooClient }
                   ))}
                 </div>
 
-                <div className="mt-8 space-y-4">
+                <div className="mt-10 space-y-4">
                   <button 
                     disabled={cart.length === 0 || isSubmitting}
                     onClick={handleSubmit}
-                    className="w-full py-5 bg-[#2c2e3e] text-white rounded-[1.5rem] font-black text-xs uppercase shadow-2xl disabled:opacity-50 hover:bg-[#017e84] transition-all flex items-center justify-center gap-3 transform active:scale-95"
+                    className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black text-xs uppercase shadow-2xl hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 transform active:scale-95 disabled:opacity-50"
                   >
                     {isSubmitting ? <Icons.Loader2 className="animate-spin" size={18} /> : (
                       <>
-                        <Icons.CheckCircle2 size={18} />
-                        CONFIRMAR PEDIDO
+                        <Icons.CheckCircle size={18} />
+                        Confirmar Orden
                       </>
                     )}
                   </button>
-                  <p className="text-[8px] text-gray-400 font-bold uppercase text-center tracking-widest leading-relaxed">
-                    Los pedidos generados aparecerán en <br/>Odoo como Transferencia Interna: Borrador
+                  <p className="text-[9px] text-slate-400 font-bold uppercase text-center tracking-widest leading-relaxed px-4">
+                    Al confirmar, se creará una transferencia en Odoo para su validación manual.
                   </p>
                 </div>
               </div>
