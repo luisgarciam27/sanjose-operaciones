@@ -1,0 +1,7 @@
+{
+  "name": "SJS - CADENA DE BOTICAS SAN JOSE S.A.C.",
+  "description": "Sistema de gestión ERP especializado para CADENA DE BOTICAS SAN JOSE S.A.C., integrando módulos de inventario, monitoreo de puntos de venta y recursos humanos.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
