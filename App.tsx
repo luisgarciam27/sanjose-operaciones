@@ -1,17 +1,17 @@
 
 import React, { useState, useMemo } from 'react';
 import * as Icons from 'lucide-react';
-import { UserSession, AppConfig } from './types';
-import { OdooClient } from './services/odooService';
-import Sidebar from './components/Sidebar';
-import Header from './components/Header';
-import LoginScreen from './components/LoginScreen';
-import DashboardModule from './components/modules/DashboardModule';
-import EmployeesModule from './components/modules/EmployeesModule';
-import TransfersModule from './components/modules/TransfersModule';
-import PosMonitorModule from './components/modules/PosMonitorModule';
-import StockModule from './components/modules/StockModule';
-import { ODOO_COLORS } from './constants';
+import { UserSession, AppConfig } from './types.ts';
+import { OdooClient } from './services/odooService.ts';
+import Sidebar from './components/Sidebar.tsx';
+import Header from './components/Header.tsx';
+import LoginScreen from './components/LoginScreen.tsx';
+import DashboardModule from './components/modules/DashboardModule.tsx';
+import EmployeesModule from './components/modules/EmployeesModule.tsx';
+import TransfersModule from './components/modules/TransfersModule.tsx';
+import PosMonitorModule from './components/modules/PosMonitorModule.tsx';
+import StockModule from './components/modules/StockModule.tsx';
+import { ODOO_COLORS } from './constants.tsx';
 
 const DEFAULT_CONFIG: AppConfig = {
   url: "https://mitienda.facturaclic.pe",
@@ -19,7 +19,7 @@ const DEFAULT_CONFIG: AppConfig = {
   user: "soporte@facturaclic.pe",
   apiKey: "7259747d6d717234ee64087c9bd4206b99fa67a1",
   wsUrl: "wss://api.sanjose.pe/ws",
-  useProxy: false
+  useProxy: true
 };
 
 const App: React.FC = () => {
@@ -45,7 +45,7 @@ const App: React.FC = () => {
   const performLoginByEmail = async (email: string) => {
     await odooClient.authenticate(DEFAULT_CONFIG.user, DEFAULT_CONFIG.apiKey);
     const userData = await odooClient.searchRead('res.users', [['login', '=', email]], ['name', 'login', 'company_id', 'partner_id']);
-    if (userData.length === 0) throw new Error('Usuario no autorizado.');
+    if (userData.length === 0) throw new Error('Usuario no autorizado o no encontrado en el sistema.');
     const user = userData[0];
 
     const isAdmin = email.includes('admin') || email.includes('herrera') || email.includes('soporte');
@@ -65,7 +65,7 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setSession(null);
-    odooClient.setProxy(false);
+    odooClient.setProxy(true);
   };
 
   if (!session) return <LoginScreen onLogin={handleLogin} isLoading={isAuthLoading} error={error} />;
@@ -85,9 +85,7 @@ const App: React.FC = () => {
     <div className="flex h-screen overflow-hidden bg-gradient-to-br from-[#f8faff] to-[#f3e8ff]">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} session={session} onLogout={handleLogout} />
       <div className="flex-1 flex flex-col min-w-0 relative">
-        {/* Decoración de fondo alegre */}
         <div className="absolute top-0 right-0 w-96 h-96 bg-teal-50 rounded-full blur-[100px] -mr-48 -mt-48 opacity-50" />
-        
         <Header session={session} />
         <main className="flex-1 overflow-y-auto px-8 pb-8 scrollbar-hide relative z-10">
           <div className="bg-white/90 backdrop-blur-md rounded-[4rem] p-12 min-h-[calc(100vh-10rem)] shadow-[0_20px_60px_-15px_rgba(113,75,103,0.08)] border border-white animate-fade-in">

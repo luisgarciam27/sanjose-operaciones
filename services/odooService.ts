@@ -1,7 +1,7 @@
 
 /**
- * Odoo XML-RPC Client - Versión Empresarial Ultra-Robusta
- * Optimizada para despliegues en Vercel y superación de bloqueos CORS.
+ * Odoo XML-RPC Client - Versión Ultra-Robusta para Producción
+ * Específicamente diseñada para superar bloqueos de cuerpo vacío en proxies.
  */
 
 const xmlEscape = (str: string) =>
@@ -62,57 +62,61 @@ const parseValue = (node: Element): any => {
 export class OdooClient {
   private uid: number | null = null;
   private apiKey: string | null = null;
-  private forceProxy: boolean = false;
+  private forceProxy: boolean = true;
 
-  constructor(private url: string, private db: string, initialProxy: boolean = false) {
+  constructor(private url: string, private db: string, initialProxy: boolean = true) {
     this.forceProxy = initialProxy;
     this.url = this.url.replace(/\/+$/, '');
   }
 
+  public setProxy(val: boolean) {
+    this.forceProxy = val;
+  }
+
   async rpcCall(endpoint: string, methodName: string, params: any[]) {
-    const xml = `<?xml version="1.0" encoding="UTF-8"?><methodCall><methodName>${methodName}</methodName><params>${params.map(p => `<param>${serialize(p)}</param>`).join('')}</params></methodCall>`;
+    const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><methodCall><methodName>${methodName}</methodName><params>${params.map(p => `<param>${serialize(p)}</param>`).join('')}</params></methodCall>`;
+    
+    // Usamos Blob para asegurar que el navegador trate el body como contenido estructurado
+    const bodyBlob = new Blob([xmlBody], { type: 'text/xml' });
     const odooUrl = `${this.url}/xmlrpc/2/${endpoint}`;
     
-    // Lista de estrategias de túnel para saltar CORS en Vercel
     const strategies = [
       { 
-        name: 'Directo', 
-        url: odooUrl, 
-        active: !this.forceProxy 
+        name: 'Proxy SJS', 
+        url: `https://corsproxy.io/?${encodeURIComponent(odooUrl)}`,
+        active: true
       },
       { 
-        name: 'Túnel Principal', 
-        url: `https://corsproxy.io/?${encodeURIComponent(odooUrl)}`, 
-        active: true 
-      },
-      { 
-        name: 'Túnel Alternativo', 
-        url: `https://api.allorigins.win/raw?url=${encodeURIComponent(odooUrl)}`, 
-        active: true 
+        name: 'Proxy Secundario', 
+        url: `https://api.allorigins.win/raw?url=${encodeURIComponent(odooUrl)}`,
+        active: true
       }
-    ].filter(s => s.active);
+    ];
 
     let lastError: string = "";
 
     for (const strategy of strategies) {
       try {
+        console.log(`[Odoo] Intentando vía ${strategy.name}...`);
         const response = await fetch(strategy.url, {
           method: 'POST',
           headers: { 
             'Content-Type': 'text/xml',
-            'Accept': 'text/xml'
+            'Accept': 'text/xml',
+            'X-Requested-With': 'XMLHttpRequest'
           },
-          body: xml
+          body: bodyBlob,
+          mode: 'cors'
         });
 
         if (!response.ok) {
-          lastError = `Status ${response.status} en ${strategy.name}`;
+          lastError = `HTTP ${response.status}`;
           continue;
         }
 
         const text = await response.text();
         if (!text || !text.includes('methodResponse')) {
-          lastError = `Respuesta no válida en ${strategy.name}`;
+          lastError = "Respuesta no válida";
           continue;
         }
 
@@ -120,22 +124,20 @@ export class OdooClient {
         const fault = doc.querySelector('fault value');
         if (fault) {
           const faultData = parseValue(fault);
-          throw new Error(`Odoo Error: ${faultData.faultString || 'Desconocido'}`);
+          throw new Error(`Odoo RPC: ${faultData.faultString || 'Error desconocido'}`);
         }
 
         const resultNode = doc.querySelector('params param value');
-        // Si llegamos aquí con éxito, marcamos que necesitamos proxy si no lo estábamos usando
-        if (strategy.name !== 'Directo') this.forceProxy = true;
         return resultNode ? parseValue(resultNode) : null;
 
       } catch (e: any) {
-        if (e.message.startsWith('Odoo Error:')) throw e;
+        if (e.message.includes('Odoo RPC:')) throw e;
         lastError = e.message;
-        console.warn(`Error en estrategia ${strategy.name}:`, e.message);
+        console.warn(`Fallo en ${strategy.name}:`, e.message);
       }
     }
     
-    throw new Error(`Error de Conexión: No se pudo establecer vínculo con San José tras intentar varios túneles. Detalle: ${lastError}`);
+    throw new Error(`No se pudo conectar al servidor San José. Por favor, revise su conexión o intente más tarde. (${lastError})`);
   }
 
   async authenticate(user: string, apiKey: string): Promise<number> {
