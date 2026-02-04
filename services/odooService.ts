@@ -1,8 +1,7 @@
 
 /**
- * Odoo XML-RPC Client - Versión Ultra-Robusta
- * Basado en el motor de conexión proporcionado por el usuario.
- * Resuelve errores 403 Forbidden y CORS mediante múltiples estrategias de proxy.
+ * Odoo XML-RPC Client - Versión Empresarial Ultra-Robusta
+ * Optimizada para despliegues en Vercel y superación de bloqueos CORS.
  */
 
 const xmlEscape = (str: string) =>
@@ -63,72 +62,57 @@ const parseValue = (node: Element): any => {
 export class OdooClient {
   private uid: number | null = null;
   private apiKey: string | null = null;
-  private useProxy: boolean = false;
+  private forceProxy: boolean = false;
 
-  constructor(private url: string, private db: string, useProxy: boolean = false) {
-    this.useProxy = useProxy;
-    this.url = this.url.replace(/\/+$/, '').replace('http://', 'https://');
-  }
-
-  setProxy(active: boolean) {
-    this.useProxy = active;
+  constructor(private url: string, private db: string, initialProxy: boolean = false) {
+    this.forceProxy = initialProxy;
+    this.url = this.url.replace(/\/+$/, '');
   }
 
   async rpcCall(endpoint: string, methodName: string, params: any[]) {
     const xml = `<?xml version="1.0" encoding="UTF-8"?><methodCall><methodName>${methodName}</methodName><params>${params.map(p => `<param>${serialize(p)}</param>`).join('')}</params></methodCall>`;
     const odooUrl = `${this.url}/xmlrpc/2/${endpoint}`;
     
-    // Estrategias de conexión basadas en tu archivo
+    // Lista de estrategias de túnel para saltar CORS en Vercel
     const strategies = [
       { 
-        name: 'CORSProxy.io',
-        use: true,
-        call: async () => fetch(`https://corsproxy.io/?${encodeURIComponent(odooUrl)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/xml' },
-          body: xml
-        })
+        name: 'Directo', 
+        url: odooUrl, 
+        active: !this.forceProxy 
       },
-      {
-        name: 'AllOrigins',
-        use: true,
-        call: async () => fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(odooUrl)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/xml' },
-          body: xml
-        })
+      { 
+        name: 'Túnel Principal', 
+        url: `https://corsproxy.io/?${encodeURIComponent(odooUrl)}`, 
+        active: true 
       },
-      {
-        name: 'Direct Connection',
-        use: !this.useProxy, // Solo intentamos directo si no se forzó el proxy
-        call: async () => fetch(odooUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/xml' },
-          body: xml
-        })
+      { 
+        name: 'Túnel Alternativo', 
+        url: `https://api.allorigins.win/raw?url=${encodeURIComponent(odooUrl)}`, 
+        active: true 
       }
-    ].filter(s => s.use);
+    ].filter(s => s.active);
 
-    let lastError: any = null;
+    let lastError: string = "";
 
     for (const strategy of strategies) {
       try {
-        const response = await strategy.call();
+        const response = await fetch(strategy.url, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'text/xml',
+            'Accept': 'text/xml'
+          },
+          body: xml
+        });
 
         if (!response.ok) {
-          lastError = new Error(`${strategy.name} status ${response.status}`);
+          lastError = `Status ${response.status} en ${strategy.name}`;
           continue;
         }
 
         const text = await response.text();
-        
-        if (!text || text.includes('xml.parsers.expat.ExpatError')) {
-          lastError = new Error(`${strategy.name} falló al procesar el XML en Odoo.`);
-          continue;
-        }
-
-        if (!text.includes('methodResponse')) {
-          lastError = new Error(`Respuesta inválida de ${strategy.name}`);
+        if (!text || !text.includes('methodResponse')) {
+          lastError = `Respuesta no válida en ${strategy.name}`;
           continue;
         }
 
@@ -136,21 +120,22 @@ export class OdooClient {
         const fault = doc.querySelector('fault value');
         if (fault) {
           const faultData = parseValue(fault);
-          throw new Error(`Odoo: ${faultData.faultString || 'Error Desconocido'}`);
+          throw new Error(`Odoo Error: ${faultData.faultString || 'Desconocido'}`);
         }
 
         const resultNode = doc.querySelector('params param value');
+        // Si llegamos aquí con éxito, marcamos que necesitamos proxy si no lo estábamos usando
+        if (strategy.name !== 'Directo') this.forceProxy = true;
         return resultNode ? parseValue(resultNode) : null;
 
       } catch (e: any) {
-        if (e.message.startsWith('Odoo:')) throw e;
-        lastError = e;
-        console.warn(`Fallo con ${strategy.name}:`, e.message);
+        if (e.message.startsWith('Odoo Error:')) throw e;
+        lastError = e.message;
+        console.warn(`Error en estrategia ${strategy.name}:`, e.message);
       }
     }
     
-    // Marcamos el error como ERROR_CORS para que App.tsx sepa que debe reintentar con proxy si falló directo
-    throw new Error(`ERROR_CORS: No se pudo conectar a Odoo tras varios intentos. Detalle: ${lastError?.message}`);
+    throw new Error(`Error de Conexión: No se pudo establecer vínculo con San José tras intentar varios túneles. Detalle: ${lastError}`);
   }
 
   async authenticate(user: string, apiKey: string): Promise<number> {
@@ -160,11 +145,11 @@ export class OdooClient {
       this.apiKey = apiKey;
       return uid;
     }
-    throw new Error("Credenciales inválidas en Odoo.");
+    throw new Error("Credenciales corporativas rechazadas.");
   }
 
   async searchRead(model: string, domain: any[], fields: string[], options: any = {}) {
-    if (!this.uid || !this.apiKey) throw new Error("Sesión no iniciada");
+    if (!this.uid || !this.apiKey) throw new Error("Sesión no autenticada");
     return await this.rpcCall('object', 'execute_kw', [
       this.db, this.uid, this.apiKey,
       model, 'search_read',
@@ -179,7 +164,7 @@ export class OdooClient {
   }
 
   async create(model: string, values: any, options: any = {}) {
-    if (!this.uid || !this.apiKey) throw new Error("Sesión no iniciada");
+    if (!this.uid || !this.apiKey) throw new Error("Sesión no autenticada");
     return await this.rpcCall('object', 'execute_kw', [
       this.db, this.uid, this.apiKey,
       model, 'create',
