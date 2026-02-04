@@ -1,6 +1,6 @@
 
 /**
- * Odoo XML-RPC Client - Versión Corporativa con Proxy Interno
+ * Odoo XML-RPC Client - Versión Edge Proxy
  */
 
 const xmlEscape = (str: string) =>
@@ -72,44 +72,47 @@ export class OdooClient {
     
     const odooTargetUrl = `${this.url}/xmlrpc/2/${endpoint}`;
     
-    if (this.onStatusChange) this.onStatusChange(`Estableciendo túnel seguro con San José...`);
+    if (this.onStatusChange) this.onStatusChange(`Conectando con el servidor San José...`);
 
     try {
-      // Llamamos a NUESTRO propio proxy en Vercel
-      const response = await fetch('/api/odoo-proxy', {
+      // Usamos el proxy con URL absoluta para evitar ambigüedades en Vercel
+      const proxyUrl = `${window.location.origin}/api/odoo-proxy`;
+      
+      const response = await fetch(proxyUrl, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json' 
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: odooTargetUrl,
           body: xmlBody
         })
       });
 
-      const text = await response.text();
-      
       if (!response.ok) {
-        throw new Error(`El servidor de enlace reportó un error (${response.status})`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Error del Servidor Proxy (${response.status})`);
       }
 
-      if (!text || !text.includes('methodResponse')) {
-        throw new Error("El servidor central no devolvió un formato válido.");
+      const text = await response.text();
+      
+      if (!text.includes('methodResponse')) {
+        throw new Error("Respuesta de Odoo inválida o vacía.");
       }
 
       const doc = new DOMParser().parseFromString(text, 'text/xml');
       const fault = doc.querySelector('fault value');
       if (fault) {
         const faultData = parseValue(fault);
-        throw new Error(`Odoo Error: ${faultData.faultString || 'Error desconocido'}`);
+        throw new Error(`Odoo: ${faultData.faultString || 'Error desconocido'}`);
       }
 
       const resultNode = doc.querySelector('params param value');
       return resultNode ? parseValue(resultNode) : null;
 
     } catch (e: any) {
-      console.error("[OdooClient] Error fatal:", e.message);
-      throw new Error(e.message);
+      if (e.message === 'Failed to fetch') {
+        throw new Error("No se pudo contactar con el Proxy de Vercel. Verifique que la función api/odoo-proxy esté desplegada.");
+      }
+      throw e;
     }
   }
 
@@ -120,11 +123,11 @@ export class OdooClient {
       this.apiKey = apiKey;
       return uid;
     }
-    throw new Error("Acceso denegado: Credenciales no válidas.");
+    throw new Error("Credenciales inválidas.");
   }
 
   async searchRead(model: string, domain: any[], fields: string[], options: any = {}) {
-    if (!this.uid || !this.apiKey) throw new Error("Sesión caducada.");
+    if (!this.uid || !this.apiKey) throw new Error("No autenticado.");
     return await this.rpcCall('object', 'execute_kw', [
       this.db, this.uid, this.apiKey,
       model, 'search_read',
@@ -135,16 +138,6 @@ export class OdooClient {
         order: options.order || '',
         context: options.context || {}
       }
-    ]);
-  }
-
-  async create(model: string, values: any, options: any = {}) {
-    if (!this.uid || !this.apiKey) throw new Error("Sesión caducada.");
-    return await this.rpcCall('object', 'execute_kw', [
-      this.db, this.uid, this.apiKey,
-      model, 'create',
-      [values],
-      { context: options.context || {} }
     ]);
   }
 

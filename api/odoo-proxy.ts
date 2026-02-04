@@ -1,59 +1,66 @@
 
 export const config = {
-  runtime: 'nodejs',
-  maxDuration: 30,
+  runtime: 'edge',
 };
 
-export default async function handler(req: any, res: any) {
-  // Manejo de CORS para desarrollo local si fuera necesario
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
-  );
+export default async function handler(req: Request) {
+  // Manejo de CORS manual para el Edge Runtime
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Accept',
+  };
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Solo se permiten peticiones POST' });
+    return new Response(JSON.stringify({ error: 'Solo se permite POST' }), {
+      status: 405,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   try {
-    const { url, body } = req.body;
+    const { url, body } = await req.json();
 
     if (!url || !body) {
-      console.error('❌ Proxy Error: Faltan parámetros url o body');
-      return res.status(400).json({ error: 'Falta URL o Cuerpo XML' });
+      return new Response(JSON.stringify({ error: 'Falta URL o Cuerpo XML' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    console.log(`[Proxy] Reenviando a: ${url}`);
-    console.log(`[Proxy] Tamaño del body: ${body.length} bytes`);
+    console.log(`[Edge Proxy] Reenviando a Odoo: ${url}`);
 
-    const response = await fetch(url, {
+    const odooResponse = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/xml',
         'Accept': 'text/xml',
-        'User-Agent': 'SJS-Vercel-Proxy/1.0'
       },
       body: body,
     });
 
-    const responseData = await response.text();
-    console.log(`[Proxy] Odoo respondió con status: ${response.status}`);
+    const responseData = await odooResponse.text();
 
-    res.setHeader('Content-Type', 'text/xml');
-    return res.status(response.status).send(responseData);
+    return new Response(responseData, {
+      status: odooResponse.status,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'text/xml',
+      },
+    });
 
   } catch (error: any) {
-    console.error('❌ Proxy Fatal Error:', error.message);
-    return res.status(500).json({ 
-      error: 'Error en la comunicación con el servidor central',
+    console.error('[Edge Proxy Fatal]:', error.message);
+    return new Response(JSON.stringify({ 
+      error: 'Error de túnel SJS', 
       details: error.message 
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 }
