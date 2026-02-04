@@ -1,7 +1,6 @@
 
 /**
- * Odoo XML-RPC Client - Versión de Diagnóstico Avanzado
- * Diseñada para evitar el error 'ExpatError' (body vacío) en proxies.
+ * Odoo XML-RPC Client - Versión Corporativa con Proxy Interno
  */
 
 const xmlEscape = (str: string) =>
@@ -62,7 +61,6 @@ const parseValue = (node: Element): any => {
 export class OdooClient {
   private uid: number | null = null;
   private apiKey: string | null = null;
-  
   public onStatusChange?: (status: string) => void;
 
   constructor(private url: string, private db: string) {
@@ -72,73 +70,47 @@ export class OdooClient {
   async rpcCall(endpoint: string, methodName: string, params: any[]) {
     const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><methodCall><methodName>${methodName}</methodName><params>${params.map(p => `<param>${serialize(p)}</param>`).join('')}</params></methodCall>`;
     
-    const odooUrl = `${this.url}/xmlrpc/2/${endpoint}`;
+    const odooTargetUrl = `${this.url}/xmlrpc/2/${endpoint}`;
     
-    // Probamos diferentes proxies, ya que algunos fallan con el body
-    const strategies = [
-      { 
-        name: 'Túnel Ultra (CORS.IO)', 
-        url: `https://corsproxy.io/?${encodeURIComponent(odooUrl)}`
-      },
-      { 
-        name: 'Túnel Alternativo (AllOrigins)', 
-        url: `https://api.allorigins.win/raw?url=${encodeURIComponent(odooUrl)}`
+    if (this.onStatusChange) this.onStatusChange(`Estableciendo túnel seguro con San José...`);
+
+    try {
+      // Llamamos a NUESTRO propio proxy en Vercel
+      const response = await fetch('/api/odoo-proxy', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({
+          url: odooTargetUrl,
+          body: xmlBody
+        })
+      });
+
+      const text = await response.text();
+      
+      if (!response.ok) {
+        throw new Error(`El servidor de enlace reportó un error (${response.status})`);
       }
-    ];
 
-    let lastError = "";
-
-    for (const strategy of strategies) {
-      try {
-        if (this.onStatusChange) this.onStatusChange(`Conectando vía ${strategy.name}...`);
-        
-        // En lugar de Blob, usamos String directamente para algunos proxies
-        const response = await fetch(strategy.url, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'text/xml'
-          },
-          body: xmlBody // Enviamos como string puro
-        });
-
-        const text = await response.text();
-        
-        // El error ExpatError ocurre porque el proxy devuelve un 200 pero vacío
-        if (!text || text.trim().length === 0) {
-          console.error(`[${strategy.name}] El servidor devolvió una respuesta vacía (Cuerpo perdido)`);
-          lastError = "El proxy perdió el contenido de la petición.";
-          continue;
-        }
-
-        if (!text.includes('methodResponse')) {
-          lastError = "Respuesta del servidor no es XML-RPC válido.";
-          continue;
-        }
-
-        const doc = new DOMParser().parseFromString(text, 'text/xml');
-        const fault = doc.querySelector('fault value');
-        if (fault) {
-          const faultData = parseValue(fault);
-          // Si el error viene de Odoo (ExpatError), lo capturamos aquí
-          const errorMsg = faultData.faultString || 'Error desconocido';
-          if (errorMsg.includes('ExpatError')) {
-            lastError = "Odoo recibió la petición pero el cuerpo llegó vacío (Fallo de Proxy).";
-            continue;
-          }
-          throw new Error(`Error de Odoo: ${errorMsg}`);
-        }
-
-        const resultNode = doc.querySelector('params param value');
-        return resultNode ? parseValue(resultNode) : null;
-
-      } catch (e: any) {
-        if (e.message.includes('Error de Odoo:')) throw e;
-        lastError = e.message;
-        console.warn(`Estrategia ${strategy.name} falló:`, e.message);
+      if (!text || !text.includes('methodResponse')) {
+        throw new Error("El servidor central no devolvió un formato válido.");
       }
+
+      const doc = new DOMParser().parseFromString(text, 'text/xml');
+      const fault = doc.querySelector('fault value');
+      if (fault) {
+        const faultData = parseValue(fault);
+        throw new Error(`Odoo Error: ${faultData.faultString || 'Error desconocido'}`);
+      }
+
+      const resultNode = doc.querySelector('params param value');
+      return resultNode ? parseValue(resultNode) : null;
+
+    } catch (e: any) {
+      console.error("[OdooClient] Error fatal:", e.message);
+      throw new Error(e.message);
     }
-    
-    throw new Error(`Error de Conexión: ${lastError} Intente recargar la página.`);
   }
 
   async authenticate(user: string, apiKey: string): Promise<number> {
@@ -148,11 +120,11 @@ export class OdooClient {
       this.apiKey = apiKey;
       return uid;
     }
-    throw new Error("Credenciales corporativas rechazadas.");
+    throw new Error("Acceso denegado: Credenciales no válidas.");
   }
 
   async searchRead(model: string, domain: any[], fields: string[], options: any = {}) {
-    if (!this.uid || !this.apiKey) throw new Error("Sesión no autenticada");
+    if (!this.uid || !this.apiKey) throw new Error("Sesión caducada.");
     return await this.rpcCall('object', 'execute_kw', [
       this.db, this.uid, this.apiKey,
       model, 'search_read',
@@ -167,7 +139,7 @@ export class OdooClient {
   }
 
   async create(model: string, values: any, options: any = {}) {
-    if (!this.uid || !this.apiKey) throw new Error("Sesión no autenticada");
+    if (!this.uid || !this.apiKey) throw new Error("Sesión caducada.");
     return await this.rpcCall('object', 'execute_kw', [
       this.db, this.uid, this.apiKey,
       model, 'create',
