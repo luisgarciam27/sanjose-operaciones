@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import * as Icons from 'lucide-react';
 import { UserSession, AppConfig } from './types.ts';
 import { OdooClient } from './services/odooService.ts';
@@ -13,13 +13,13 @@ import PosMonitorModule from './components/modules/PosMonitorModule.tsx';
 import StockModule from './components/modules/StockModule.tsx';
 import { ODOO_COLORS } from './constants.tsx';
 
+// Actualizado según el endpoint de servidor-san-jose detectado
 const DEFAULT_CONFIG: AppConfig = {
-  url: "https://mitienda.facturaclic.pe",
+  url: "https://mitienda.facturaclic.pe", // Mantener la URL base si es la correcta para el XML-RPC
   db: "mitienda_base_ac",
   user: "soporte@facturaclic.pe",
   apiKey: "7259747d6d717234ee64087c9bd4206b99fa67a1",
-  wsUrl: "wss://api.sanjose.pe/ws",
-  useProxy: true
+  wsUrl: "wss://api.sanjose.pe/ws"
 };
 
 const App: React.FC = () => {
@@ -27,25 +27,37 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('transfers');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loginStatus, setLoginStatus] = useState<string>("");
 
-  const odooClient = useMemo(() => new OdooClient(DEFAULT_CONFIG.url, DEFAULT_CONFIG.db, DEFAULT_CONFIG.useProxy), []);
+  const odooClient = useMemo(() => new OdooClient(DEFAULT_CONFIG.url, DEFAULT_CONFIG.db), []);
+
+  useEffect(() => {
+    odooClient.onStatusChange = (status) => setLoginStatus(status);
+  }, [odooClient]);
 
   const handleLogin = async (email: string) => {
     setIsAuthLoading(true);
     setError(null);
+    setLoginStatus("Iniciando conexión segura...");
     try {
       await performLoginByEmail(email);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setIsAuthLoading(false);
+      setLoginStatus("");
     }
   };
 
   const performLoginByEmail = async (email: string) => {
+    // 1. Autenticación técnica
     await odooClient.authenticate(DEFAULT_CONFIG.user, DEFAULT_CONFIG.apiKey);
+    
+    // 2. Búsqueda de usuario
+    setLoginStatus("Buscando su perfil en la base de datos...");
     const userData = await odooClient.searchRead('res.users', [['login', '=', email]], ['name', 'login', 'company_id', 'partner_id']);
-    if (userData.length === 0) throw new Error('Usuario no autorizado o no encontrado en el sistema.');
+    
+    if (userData.length === 0) throw new Error('El correo ingresado no está registrado en el sistema San José.');
     const user = userData[0];
 
     const isAdmin = email.includes('admin') || email.includes('herrera') || email.includes('soporte');
@@ -65,10 +77,19 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setSession(null);
-    odooClient.setProxy(true);
   };
 
-  if (!session) return <LoginScreen onLogin={handleLogin} isLoading={isAuthLoading} error={error} />;
+  if (!session) return (
+    <div className="relative">
+      <LoginScreen onLogin={handleLogin} isLoading={isAuthLoading} error={error} />
+      {isAuthLoading && loginStatus && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-xl px-8 py-4 rounded-3xl shadow-2xl border border-indigo-100 z-[200] flex items-center gap-4 animate-bounce">
+          <Icons.Loader2 className="animate-spin text-indigo-500" size={20} />
+          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{loginStatus}</span>
+        </div>
+      )}
+    </div>
+  );
 
   const renderModule = () => {
     switch (activeTab) {

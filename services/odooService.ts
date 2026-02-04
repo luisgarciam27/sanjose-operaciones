@@ -1,7 +1,7 @@
 
 /**
- * Odoo XML-RPC Client - Versión Ultra-Robusta para Producción
- * Específicamente diseñada para superar bloqueos de cuerpo vacío en proxies.
+ * Odoo XML-RPC Client - Versión de Diagnóstico Avanzado
+ * Diseñada para evitar el error 'ExpatError' (body vacío) en proxies.
  */
 
 const xmlEscape = (str: string) =>
@@ -62,61 +62,56 @@ const parseValue = (node: Element): any => {
 export class OdooClient {
   private uid: number | null = null;
   private apiKey: string | null = null;
-  private forceProxy: boolean = true;
+  
+  public onStatusChange?: (status: string) => void;
 
-  constructor(private url: string, private db: string, initialProxy: boolean = true) {
-    this.forceProxy = initialProxy;
+  constructor(private url: string, private db: string) {
     this.url = this.url.replace(/\/+$/, '');
-  }
-
-  public setProxy(val: boolean) {
-    this.forceProxy = val;
   }
 
   async rpcCall(endpoint: string, methodName: string, params: any[]) {
     const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><methodCall><methodName>${methodName}</methodName><params>${params.map(p => `<param>${serialize(p)}</param>`).join('')}</params></methodCall>`;
     
-    // Usamos Blob para asegurar que el navegador trate el body como contenido estructurado
-    const bodyBlob = new Blob([xmlBody], { type: 'text/xml' });
     const odooUrl = `${this.url}/xmlrpc/2/${endpoint}`;
     
+    // Probamos diferentes proxies, ya que algunos fallan con el body
     const strategies = [
       { 
-        name: 'Proxy SJS', 
-        url: `https://corsproxy.io/?${encodeURIComponent(odooUrl)}`,
-        active: true
+        name: 'Túnel Ultra (CORS.IO)', 
+        url: `https://corsproxy.io/?${encodeURIComponent(odooUrl)}`
       },
       { 
-        name: 'Proxy Secundario', 
-        url: `https://api.allorigins.win/raw?url=${encodeURIComponent(odooUrl)}`,
-        active: true
+        name: 'Túnel Alternativo (AllOrigins)', 
+        url: `https://api.allorigins.win/raw?url=${encodeURIComponent(odooUrl)}`
       }
     ];
 
-    let lastError: string = "";
+    let lastError = "";
 
     for (const strategy of strategies) {
       try {
-        console.log(`[Odoo] Intentando vía ${strategy.name}...`);
+        if (this.onStatusChange) this.onStatusChange(`Conectando vía ${strategy.name}...`);
+        
+        // En lugar de Blob, usamos String directamente para algunos proxies
         const response = await fetch(strategy.url, {
           method: 'POST',
           headers: { 
-            'Content-Type': 'text/xml',
-            'Accept': 'text/xml',
-            'X-Requested-With': 'XMLHttpRequest'
+            'Content-Type': 'text/xml'
           },
-          body: bodyBlob,
-          mode: 'cors'
+          body: xmlBody // Enviamos como string puro
         });
 
-        if (!response.ok) {
-          lastError = `HTTP ${response.status}`;
+        const text = await response.text();
+        
+        // El error ExpatError ocurre porque el proxy devuelve un 200 pero vacío
+        if (!text || text.trim().length === 0) {
+          console.error(`[${strategy.name}] El servidor devolvió una respuesta vacía (Cuerpo perdido)`);
+          lastError = "El proxy perdió el contenido de la petición.";
           continue;
         }
 
-        const text = await response.text();
-        if (!text || !text.includes('methodResponse')) {
-          lastError = "Respuesta no válida";
+        if (!text.includes('methodResponse')) {
+          lastError = "Respuesta del servidor no es XML-RPC válido.";
           continue;
         }
 
@@ -124,20 +119,26 @@ export class OdooClient {
         const fault = doc.querySelector('fault value');
         if (fault) {
           const faultData = parseValue(fault);
-          throw new Error(`Odoo RPC: ${faultData.faultString || 'Error desconocido'}`);
+          // Si el error viene de Odoo (ExpatError), lo capturamos aquí
+          const errorMsg = faultData.faultString || 'Error desconocido';
+          if (errorMsg.includes('ExpatError')) {
+            lastError = "Odoo recibió la petición pero el cuerpo llegó vacío (Fallo de Proxy).";
+            continue;
+          }
+          throw new Error(`Error de Odoo: ${errorMsg}`);
         }
 
         const resultNode = doc.querySelector('params param value');
         return resultNode ? parseValue(resultNode) : null;
 
       } catch (e: any) {
-        if (e.message.includes('Odoo RPC:')) throw e;
+        if (e.message.includes('Error de Odoo:')) throw e;
         lastError = e.message;
-        console.warn(`Fallo en ${strategy.name}:`, e.message);
+        console.warn(`Estrategia ${strategy.name} falló:`, e.message);
       }
     }
     
-    throw new Error(`No se pudo conectar al servidor San José. Por favor, revise su conexión o intente más tarde. (${lastError})`);
+    throw new Error(`Error de Conexión: ${lastError} Intente recargar la página.`);
   }
 
   async authenticate(user: string, apiKey: string): Promise<number> {
