@@ -2,7 +2,7 @@
 import React from 'react';
 import * as Icons from 'lucide-react';
 import { UserSession } from '../types';
-import { MODULES } from '../constants';
+import { MODULES, ODOO_COLORS } from '../constants';
 
 interface SidebarProps {
   activeTab: string;
@@ -13,18 +13,22 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, session, onLogout }) => {
   return (
-    <aside className="w-72 bg-[#0f172a] text-slate-400 flex flex-col h-full z-50">
-      <div className="p-8 flex items-center gap-4">
-        <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white">
-          <Icons.Zap size={20} fill="currentColor" />
-        </div>
-        <div>
-          <h1 className="text-white font-bold text-base tracking-tight leading-none">SJS Portal</h1>
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Enterprise</p>
+    <aside className="w-80 h-full flex flex-col z-50 transition-all duration-500" style={{ backgroundColor: ODOO_COLORS.purple }}>
+      {/* Branding Section */}
+      <div className="p-10">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-[1.25rem] bg-white flex items-center justify-center shadow-2xl transform hover:rotate-6 transition-transform">
+            <Icons.Infinity size={32} style={{ color: ODOO_COLORS.purple }} strokeWidth={2.5} />
+          </div>
+          <div>
+            <h1 className="text-xl font-black text-white tracking-tighter leading-none">SAN JOSÉ</h1>
+            <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] mt-1.5">Enterprise Portal</p>
+          </div>
         </div>
       </div>
 
-      <nav className="flex-1 px-4 py-4 space-y-1">
+      {/* Navigation - Solo muestra lo que el usuario tiene permitido */}
+      <nav className="flex-1 px-4 mt-8 space-y-2">
         {MODULES.filter(m => (m.roles as readonly string[]).includes(session.role)).map((item) => {
           const Icon = (Icons as any)[item.icon];
           const isActive = activeTab === item.id;
@@ -33,40 +37,49 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, session, onL
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all group ${
+              className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 group ${
                 isActive 
-                  ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' 
-                  : 'hover:bg-slate-800/50 hover:text-slate-200'
+                  ? 'bg-white text-slate-900 shadow-xl shadow-black/20 translate-x-2' 
+                  : 'text-white/60 hover:bg-white/5 hover:text-white'
               }`}
             >
               <Icon 
-                size={18} 
-                className={isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'} 
+                size={22} 
+                className={isActive ? '' : 'opacity-40 group-hover:opacity-100'} 
+                style={isActive ? { color: ODOO_COLORS.purple } : {}}
               />
-              <span className="text-sm font-semibold tracking-tight">{item.label}</span>
+              <span className={`text-sm font-bold tracking-tight ${isActive ? 'opacity-100' : 'opacity-80'}`}>
+                {item.label}
+              </span>
+              {isActive && (
+                <div className="ml-auto w-1.5 h-1.5 rounded-full" style={{ backgroundColor: ODOO_COLORS.teal }} />
+              )}
             </button>
           );
         })}
       </nav>
 
-      <div className="p-4 m-4 bg-slate-800/40 rounded-2xl border border-slate-700/50">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center text-white font-bold text-sm">
-            {session.name.charAt(0)}
+      {/* User Session Info Card */}
+      <div className="p-6">
+        <div className="bg-black/10 rounded-[2rem] p-6 border border-white/5 backdrop-blur-md">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-lg border-2 border-white/10 shadow-inner" style={{ backgroundColor: ODOO_COLORS.teal }}>
+              {session.name.charAt(0)}
+            </div>
+            <div className="overflow-hidden">
+              <p className="text-sm font-black text-white truncate leading-tight">{session.name}</p>
+              <p className="text-[10px] uppercase font-black text-white/30 tracking-widest mt-1">{session.role}</p>
+            </div>
           </div>
-          <div className="overflow-hidden">
-            <p className="text-xs font-bold text-white truncate">{session.name}</p>
-            <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">{session.role}</p>
-          </div>
+          
+          <button 
+            onClick={onLogout}
+            className="w-full flex items-center justify-center gap-3 py-3.5 bg-white/5 hover:bg-red-500/20 hover:text-red-100 text-white/50 rounded-xl transition-all text-[10px] font-black uppercase tracking-widest border border-white/5"
+          >
+            <Icons.LogOut size={14} strokeWidth={3} />
+            Salir del Sistema
+          </button>
         </div>
-        
-        <button 
-          onClick={onLogout}
-          className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-800 hover:bg-red-500/10 hover:text-red-400 text-slate-400 rounded-xl transition-all text-xs font-bold"
-        >
-          <Icons.LogOut size={14} />
-          Cerrar Sesión
-        </button>
       </div>
     </aside>
   );
