@@ -1,6 +1,6 @@
 
 /**
- * Odoo XML-RPC Client - Versión Edge Proxy
+ * Odoo XML-RPC Client - Optimizado para Vercel Edge
  */
 
 const xmlEscape = (str: string) =>
@@ -69,49 +69,44 @@ export class OdooClient {
 
   async rpcCall(endpoint: string, methodName: string, params: any[]) {
     const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><methodCall><methodName>${methodName}</methodName><params>${params.map(p => `<param>${serialize(p)}</param>`).join('')}</params></methodCall>`;
-    
     const odooTargetUrl = `${this.url}/xmlrpc/2/${endpoint}`;
     
-    if (this.onStatusChange) this.onStatusChange(`Conectando con el servidor San José...`);
+    if (this.onStatusChange) this.onStatusChange(`Conectando con San José...`);
 
     try {
-      // Usamos el proxy con URL absoluta para evitar ambigüedades en Vercel
-      const proxyUrl = `${window.location.origin}/api/odoo-proxy`;
-      
-      const response = await fetch(proxyUrl, {
+      const response = await fetch('/api/odoo-proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: odooTargetUrl,
-          body: xmlBody
-        })
+        body: JSON.stringify({ url: odooTargetUrl, body: xmlBody })
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Error del Servidor Proxy (${response.status})`);
+        const errorText = await response.text();
+        let errorMsg = `Error de Red (${response.status})`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMsg = errorJson.error || errorJson.details || errorMsg;
+        } catch(e) {}
+        throw new Error(errorMsg);
       }
 
       const text = await response.text();
-      
-      if (!text.includes('methodResponse')) {
-        throw new Error("Respuesta de Odoo inválida o vacía.");
+      if (!text || !text.includes('methodResponse')) {
+        throw new Error("Respuesta inválida del servidor central.");
       }
 
       const doc = new DOMParser().parseFromString(text, 'text/xml');
       const fault = doc.querySelector('fault value');
       if (fault) {
         const faultData = parseValue(fault);
-        throw new Error(`Odoo: ${faultData.faultString || 'Error desconocido'}`);
+        throw new Error(`Error Odoo: ${faultData.faultString || 'Error desconocido'}`);
       }
 
       const resultNode = doc.querySelector('params param value');
       return resultNode ? parseValue(resultNode) : null;
 
     } catch (e: any) {
-      if (e.message === 'Failed to fetch') {
-        throw new Error("No se pudo contactar con el Proxy de Vercel. Verifique que la función api/odoo-proxy esté desplegada.");
-      }
+      console.error("[OdooRPC] Error:", e.message);
       throw e;
     }
   }
@@ -123,36 +118,35 @@ export class OdooClient {
       this.apiKey = apiKey;
       return uid;
     }
-    throw new Error("Credenciales inválidas.");
+    throw new Error("Acceso denegado: Credenciales no válidas.");
   }
 
   async searchRead(model: string, domain: any[], fields: string[], options: any = {}) {
-    if (!this.uid || !this.apiKey) throw new Error("No autenticado.");
+    if (!this.uid || !this.apiKey) throw new Error("Sesión no iniciada.");
     return await this.rpcCall('object', 'execute_kw', [
       this.db, this.uid, this.apiKey,
       model, 'search_read',
       [domain],
-      { 
-        fields, 
-        limit: options.limit || 100, 
-        order: options.order || '',
-        context: options.context || {}
-      }
+      { fields, limit: options.limit || 80, order: options.order || 'id desc' }
+    ]);
+  }
+
+  async create(model: string, values: any) {
+    if (!this.uid || !this.apiKey) throw new Error("Sesión no iniciada.");
+    return await this.rpcCall('object', 'execute_kw', [
+      this.db, this.uid, this.apiKey,
+      model, 'create',
+      [values]
     ]);
   }
 
   async getProductsWithStock(locationId: number, search: string = ''): Promise<any[]> {
     const domain: any[] = [['type', '=', 'product']];
-    if (search) {
-      domain.push('|', ['name', 'ilike', search], ['default_code', '=', search]);
-    }
+    if (search) domain.push('|', ['name', 'ilike', search], ['default_code', 'ilike', search]);
+    
     return await this.searchRead('product.product', domain, 
       ['name', 'default_code', 'qty_available', 'list_price', 'uom_id'], 
-      { 
-        context: { location: locationId }, 
-        limit: 40,
-        order: 'qty_available desc'
-      }
+      { context: { location: locationId }, limit: 40 }
     );
   }
 }

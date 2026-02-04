@@ -4,7 +4,6 @@ export const config = {
 };
 
 export default async function handler(req: Request) {
-  // Manejo de CORS manual para el Edge Runtime
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -16,47 +15,50 @@ export default async function handler(req: Request) {
   }
 
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Solo se permite POST' }), {
+    return new Response(JSON.stringify({ error: 'Método no permitido' }), {
       status: 405,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
   try {
-    const { url, body } = await req.json();
+    const rawData = await req.json();
+    const { url, body } = rawData;
 
     if (!url || !body) {
-      return new Response(JSON.stringify({ error: 'Falta URL o Cuerpo XML' }), {
+      return new Response(JSON.stringify({ error: 'URL o cuerpo XML ausente' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    console.log(`[Edge Proxy] Reenviando a Odoo: ${url}`);
+    console.log(`[Proxy] Iniciando petición a: ${url}`);
 
     const odooResponse = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/xml',
         'Accept': 'text/xml',
+        'Connection': 'keep-alive'
       },
       body: body,
     });
 
-    const responseData = await odooResponse.text();
+    const responseText = await odooResponse.text();
 
-    return new Response(responseData, {
+    return new Response(responseText, {
       status: odooResponse.status,
       headers: {
         ...corsHeaders,
         'Content-Type': 'text/xml',
+        'Cache-Control': 'no-store'
       },
     });
 
   } catch (error: any) {
-    console.error('[Edge Proxy Fatal]:', error.message);
+    console.error('[Proxy Error]:', error.message);
     return new Response(JSON.stringify({ 
-      error: 'Error de túnel SJS', 
+      error: 'Error de conexión con el servidor central', 
       details: error.message 
     }), {
       status: 500,
